@@ -25,10 +25,116 @@ struct Folder : public Finfo
     list<Finfo*> children;
 };
 
+string readFromPipe(string name)
+{
+    wcout << "Connecting to pipe..." << endl;
+    string pipeName = "\\\\.\\pipe\\" + name;
+    // Open the named pipe
+    // Most of these parameters aren't very relevant for pipes.
+    wstring temp = wstring(pipeName.begin(), pipeName.end());
+    const wchar_t* nameW = temp.c_str();
+    HANDLE pipe = CreateFile(
+        nameW,
+        GENERIC_READ, // only need read access
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (pipe == INVALID_HANDLE_VALUE) {
+        wcout << "Failed to connect to pipe." << endl;
+        // look up error code here using GetLastError()
+        system("pause");
+        return "";
+    }
+    wcout << "Reading data from pipe..." << endl;
+    // The read operation will block until there is data to read
+    wchar_t buffer[128];
+    DWORD numBytesRead = 0;
+    BOOL result = ReadFile(
+        pipe,
+        buffer, // the data from the pipe will be put here
+        127 * sizeof(wchar_t), // number of bytes allocated
+        &numBytesRead, // this will store number of bytes actually read
+        NULL // not using overlapped IO
+    );
+    if (result) {
+        buffer[numBytesRead / sizeof(wchar_t)] = '\0'; // null terminate the string
+        wcout << "Number of bytes read: " << numBytesRead << endl;
+        wcout << "Message: " << buffer << endl;
+    }
+    else {
+        wcout << "Failed to read data from the pipe." << endl;
+    }
+    // Close our pipe handle
+    CloseHandle(pipe);
+    wcout << "Done." << endl;
+    return "To do";
+}
+
+void writeToPipe(string name, string content)
+{
+    wcout << "Creating an instance of a named pipe..." << endl;
+    string pipeName = "\\\\.\\pipe\\" + name;
+    // Create a pipe to send data
+    HANDLE pipe = CreateNamedPipe(
+        wstring(pipeName.begin(), pipeName.end()).c_str(), // name of the pipe
+        PIPE_ACCESS_OUTBOUND, // 1-way pipe -- send only
+        PIPE_TYPE_BYTE, // send data as a byte stream
+        1, // only allow 1 instance of this pipe
+        0, // no outbound buffer
+        0, // no inbound buffer
+        0, // use default wait time
+        NULL // use default security attributes
+    );
+    if (pipe == NULL || pipe == INVALID_HANDLE_VALUE) 
+    {
+        wcout << "Failed to create outbound pipe instance.";
+        // look up error code here using GetLastError()
+        system("pause");
+        return;
+    }
+    wcout << "Waiting for a client to connect to the pipe..." << endl;
+    // This call blocks until a client process connects to the pipe
+    BOOL result = ConnectNamedPipe(pipe, NULL);
+    if (!result) 
+    {
+        wcout << "Failed to make connection on named pipe." << endl;
+        // look up error code here using GetLastError()
+        CloseHandle(pipe); // close the pipe
+        system("pause");
+        return;
+    }
+    wcout << "Sending data to pipe..." << endl;
+    // This call blocks until a client process reads all the data
+    wstring temp = wstring(content.begin(), content.end());
+    const wchar_t* data = temp.c_str();
+    DWORD numBytesWritten = 0;
+    result = WriteFile(
+        pipe, // handle to our outbound pipe
+        data, // data to send
+        wcslen(data) * sizeof(wchar_t), // length of data to send (bytes)
+        &numBytesWritten, // will store actual amount of data sent
+        NULL // not using overlapped IO
+    );
+    if (result) 
+    {
+        wcout << "Number of bytes sent: " << numBytesWritten << endl;
+    }
+    else 
+    {
+        wcout << "Failed to send data." << endl;
+        // look up error code here using GetLastError()
+    }
+    // Close the pipe (automatically disconnects client too)
+    CloseHandle(pipe);
+}
+
 void writeFiles(Folder* folder)
 {
     cout << folder->name<<endl;
-    int level=0;
+    int level=1;
     for (Folder* current = folder->parent; current != NULL; current = current->parent)
         level++;
     for (Finfo* current : folder->children)
@@ -51,12 +157,12 @@ Folder* getFiles(string folderName)
     folder->modificationDate = entry->last_write_time();
     folder->length = entry->file_size();
     folder->parent = NULL;
-    cout << folderName << endl;
+    //cout << folderName << endl;
 
     for (const auto& entry : fs::directory_iterator(folderName))
     {
         Finfo* current;
-        cout << "\t" << entry.path().string() << endl;
+        //cout << "\t" << entry.path().string() << endl;
         if (entry.is_directory())
         {
             STARTUPINFO si;
@@ -117,7 +223,7 @@ Folder* getFiles(string folderName)
 
 void main(int argc, char* argv[])
 {
-
+    
     if (argc != 2)
     {
         printf("Usage: %s [cmdline]\n", argv[0]);
@@ -125,6 +231,7 @@ void main(int argc, char* argv[])
     }
 
     std::string str(argv[1]);
-    getFiles(str);
+    writeFiles(getFiles(str));
     system("pause");
+
 }
