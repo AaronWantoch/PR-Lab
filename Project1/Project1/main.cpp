@@ -6,6 +6,8 @@
 #include <tchar.h>
 #include <atlstr.h>
 
+#define N 2000
+
 namespace fs = std::filesystem;
 
 using namespace std;
@@ -28,7 +30,7 @@ struct Folder : public Finfo
 string readFromPipe(string name)
 {
     wcout << "Connecting to pipe..." << endl;
-    string pipeName = "\\\\.\\pipe\\" + name;
+    string pipeName = "\\\\.\\pipe\\my_pipe";
     // Open the named pipe
     // Most of these parameters aren't very relevant for pipes.
     wstring temp = wstring(pipeName.begin(), pipeName.end());
@@ -44,18 +46,18 @@ string readFromPipe(string name)
     );
     if (pipe == INVALID_HANDLE_VALUE) {
         wcout << "Failed to connect to pipe." << endl;
-        // look up error code here using GetLastError()
+        cout<<GetLastError();
         system("pause");
         return "";
     }
     wcout << "Reading data from pipe..." << endl;
     // The read operation will block until there is data to read
-    wchar_t buffer[128];
+    wchar_t buffer[N+1];
     DWORD numBytesRead = 0;
     BOOL result = ReadFile(
         pipe,
         buffer, // the data from the pipe will be put here
-        127 * sizeof(wchar_t), // number of bytes allocated
+        N * sizeof(wchar_t), // number of bytes allocated
         &numBytesRead, // this will store number of bytes actually read
         NULL // not using overlapped IO
     );
@@ -70,13 +72,16 @@ string readFromPipe(string name)
     // Close our pipe handle
     CloseHandle(pipe);
     wcout << "Done." << endl;
-    return "To do";
+    wstring ws(buffer);
+    // your new String
+    string str(ws.begin(), ws.end());
+    return str;
 }
 
 void writeToPipe(string name, string content)
 {
     wcout << "Creating an instance of a named pipe..." << endl;
-    string pipeName = "\\\\.\\pipe\\" + name;
+    string pipeName = "\\\\.\\pipe\\my_pipe";
     // Create a pipe to send data
     HANDLE pipe = CreateNamedPipe(
         wstring(pipeName.begin(), pipeName.end()).c_str(), // name of the pipe
@@ -91,7 +96,7 @@ void writeToPipe(string name, string content)
     if (pipe == NULL || pipe == INVALID_HANDLE_VALUE) 
     {
         wcout << "Failed to create outbound pipe instance.";
-        // look up error code here using GetLastError()
+        cout << GetLastError() << endl;
         system("pause");
         return;
     }
@@ -131,37 +136,14 @@ void writeToPipe(string name, string content)
     CloseHandle(pipe);
 }
 
-void writeFiles(Folder* folder)
+void getFiles(string folderName, bool isMain)
 {
-    cout << folder->name<<endl;
-    int level=1;
-    for (Folder* current = folder->parent; current != NULL; current = current->parent)
-        level++;
-    for (Finfo* current : folder->children)
-    {
-        for (int i = 0; i < level; i++)
-            cout << "\t";
-        if (current->isFile)
-            cout << current->name<<endl;
-        else
-            writeFiles((Folder*)current);
-    }
-}
-
-Folder* getFiles(string folderName)
-{
-    Folder* folder = new Folder();
-    fs::directory_entry* entry = new fs::directory_entry(fs::path(folderName));
-    folder->name = folderName;
-    folder->isFile = false;
-    folder->modificationDate = entry->last_write_time();
-    folder->length = entry->file_size();
-    folder->parent = NULL;
+    string content;
+    content += folderName + "\n";
     //cout << folderName << endl;
 
     for (const auto& entry : fs::directory_iterator(folderName))
     {
-        Finfo* current;
         //cout << "\t" << entry.path().string() << endl;
         if (entry.is_directory())
         {
@@ -174,6 +156,7 @@ Folder* getFiles(string folderName)
 
             string command = "C:\\Studia\\PR\\Laby\\Lab1\\Project1\\Debug\\Project1.exe ";
             command.append(entry.path().string());
+            command.append(" NotMain");
             TCHAR commandTChar[200];
             _tcscpy_s(commandTChar, CA2T(command.c_str()));
 
@@ -191,7 +174,7 @@ Folder* getFiles(string folderName)
                 )
             {
                 printf("CreateProcess failed (%d).\n", GetLastError());
-                return NULL;
+                return;
             }
             //current = getFiles(entry.path().string());
 
@@ -204,34 +187,65 @@ Folder* getFiles(string folderName)
         }
         else
         {
-            current = new Finfo();
-            current->isFile = true;
-            current->length = entry.file_size();
-            current->modificationDate = entry.last_write_time();
-            current->parent = folder;
-            current->name = entry.path().string();
-            current->parent = folder;
-            folder->children.push_back(current);
+            content += "\t" + entry.path().string() + "\n";
         }
 
     }
-
-
-    delete entry;
-    return folder;
+    //cout << content << endl;
+    if(!isMain)
+        writeToPipe(folderName, content);
 }
 
 void main(int argc, char* argv[])
 {
     
-    if (argc != 2)
+    if (argc < 2)
     {
         printf("Usage: %s [cmdline]\n", argv[0]);
         return;
     }
+    bool isMain = true;
+    if (argc == 3)
+        isMain = false;
 
     std::string str(argv[1]);
-    writeFiles(getFiles(str));
+    if (isMain)
+    {
+        STARTUPINFO si;
+        PROCESS_INFORMATION pi;
+
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        ZeroMemory(&pi, sizeof(pi));
+
+        string command = "C:\\Studia\\PR\\Laby\\Lab1\\Project1\\Debug\\Project1.exe ";
+        command.append(".");
+        command.append(" NotMain");
+        TCHAR commandTChar[200];
+        _tcscpy_s(commandTChar, CA2T(command.c_str()));
+
+        // Start the child process. 
+        if (!CreateProcess(NULL,   // No module name (use command line)
+            commandTChar,        // Command line
+            NULL,           // Process handle not inheritable
+            NULL,           // Thread handle not inheritable
+            FALSE,          // Set handle inheritance to FALSE
+            CREATE_NEW_CONSOLE,              // No creation flags
+            NULL,           // Use parent's environment block
+            NULL,           // Use parent's starting directory 
+            &si,            // Pointer to STARTUPINFO structure
+            &pi)           // Pointer to PROCESS_INFORMATION structure
+            )
+        {
+            printf("CreateProcess failed (%d).\n", GetLastError());
+            return;
+        }
+    }
+    else
+        writeToPipe("", "It lives");
+    if(argc==2)
+        cout << readFromPipe(str);
+    
     system("pause");
 
 }
