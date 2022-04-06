@@ -28,9 +28,9 @@ struct Folder : public Finfo
     list<Finfo*> children;
 };
 
-string readFromPipe()
+string readFromPipe(string name)
 {
-    string pipeName = "\\\\.\\pipe\\pipe";
+    string pipeName = "\\\\.\\pipe\\pipe"+name;
     // Open the named pipe
     // Most of these parameters aren't very relevant for pipes.
     wstring temp = wstring(pipeName.begin(), pipeName.end());
@@ -81,10 +81,9 @@ string readFromPipe()
     return str;
 }
 
-void writeToPipe(string content)
+void writeToPipe(string name, string content)
 {
-    cout << "Creating an instance of a named pipe..." << endl;
-    string pipeName = "\\\\.\\pipe\\pipe";
+    string pipeName = "\\\\.\\pipe\\pipe"+name;
     // Create a pipe to send data
     wstring temp = wstring(pipeName.begin(), pipeName.end());
     const wchar_t* nameW = temp.c_str();
@@ -129,11 +128,27 @@ void writeToPipe(string content)
     CloseHandle(pipe);
 }
 
-void getFiles(string folderName, bool isMain)
+string addTabs(string content)
+{
+    int k = 0;
+    string copy = content;
+    for (int i = 0; i < content.size(); i++)
+    {
+        if (content[i] == '\n' && i + 1 < content.size())
+        {
+            k++;
+            copy.insert(i+k, "\t");
+
+        }
+    }
+    return copy;
+}
+
+string getFiles(string folderName)
 {
     string content;
     content += folderName + "\n";
-    //cout << folderName << endl;
+    int howManyFolders = 0;
 
     for (const auto& entry : fs::directory_iterator(folderName))
     {
@@ -149,7 +164,8 @@ void getFiles(string folderName, bool isMain)
 
             string command = "C:\\Studia\\PR\\Laby\\Lab1\\Project1\\Debug\\Project1.exe ";
             command.append(entry.path().string());
-            command.append(" ItIsNotMain");
+            command.append(" ");
+            command.append(to_string(GetCurrentProcessId()));
             TCHAR commandTChar[200];
             _tcscpy_s(commandTChar, CA2T(command.c_str()));
 
@@ -167,7 +183,7 @@ void getFiles(string folderName, bool isMain)
                 )
             {
                 printf("CreateProcess failed (%d).\n", GetLastError());
-                return;
+                return "ERROR CREATING PROCESS";
             }
             //current = getFiles(entry.path().string());
 
@@ -175,6 +191,7 @@ void getFiles(string folderName, bool isMain)
             // WaitForSingleObject(pi.hProcess, 100);
 
             // Close process and thread handles. 
+            howManyFolders++;
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
         }
@@ -183,9 +200,12 @@ void getFiles(string folderName, bool isMain)
             content += "\t" + entry.path().string() + "\n";
         }
     }
-    cout << content << endl;
-    if(!isMain)
-        writeToPipe(content);
+    for (int i=0; i<howManyFolders; i++)
+    {
+        content += addTabs(readFromPipe(to_string(GetCurrentProcessId())));
+    }
+
+    return content;
 }
 
 void main(int argc, char* argv[])
@@ -201,14 +221,13 @@ void main(int argc, char* argv[])
         isMain = false;
 
     std::string str(argv[1]);
-    getFiles(argv[1], isMain);
-    if (isMain)
+    string content = getFiles(argv[1]);
+    cout << content << endl;
+    if (!isMain)
     {
-        while (true)
-        {
-            cout << readFromPipe();
-        }
+        writeToPipe(argv[2], content);
     }
+    
         
     system("pause");
 
