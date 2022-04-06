@@ -5,8 +5,9 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <atlstr.h>
-
-#define N 2000
+#include <cstdlib>
+#include <Windows.h>
+#include <csignal>
 
 namespace fs = std::filesystem;
 
@@ -27,67 +28,71 @@ struct Folder : public Finfo
     list<Finfo*> children;
 };
 
-string readFromPipe(string name)
+string readFromPipe()
 {
-    wcout << "Connecting to pipe..." << endl;
-    string pipeName = "\\\\.\\pipe\\my_pipe";
+    string pipeName = "\\\\.\\pipe\\pipe";
     // Open the named pipe
     // Most of these parameters aren't very relevant for pipes.
     wstring temp = wstring(pipeName.begin(), pipeName.end());
     const wchar_t* nameW = temp.c_str();
-    HANDLE pipe = CreateFile(
-        nameW,
-        GENERIC_READ, // only need read access
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        NULL,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-    if (pipe == INVALID_HANDLE_VALUE) {
-        wcout << "Failed to connect to pipe." << endl;
-        cout<<GetLastError();
-        system("pause");
-        return "";
-    }
-    wcout << "Reading data from pipe..." << endl;
-    // The read operation will block until there is data to read
-    wchar_t buffer[N+1];
+    HANDLE pipe;
+    do
+    {
+        pipe = CreateFile(
+            nameW,
+            GENERIC_READ, // only need read access
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+    } while (pipe == INVALID_HANDLE_VALUE);
+    Sleep(1);//It can't get to readfile before Connect to named pipe is called
+
+
+    wchar_t buffer[2001];
     DWORD numBytesRead = 0;
-    BOOL result = ReadFile(
+    BOOL result;
+
+    // The read operation will block until there is data to read
+    result = ReadFile(
         pipe,
         buffer, // the data from the pipe will be put here
-        N * sizeof(wchar_t), // number of bytes allocated
+        2000 * sizeof(wchar_t), // number of bytes allocated
         &numBytesRead, // this will store number of bytes actually read
         NULL // not using overlapped IO
     );
     if (result) {
         buffer[numBytesRead / sizeof(wchar_t)] = '\0'; // null terminate the string
-        wcout << "Number of bytes read: " << numBytesRead << endl;
-        wcout << "Message: " << buffer << endl;
+        //cout << "Number of bytes read: " << numBytesRead << endl;
+        //cout << "Message: " << buffer << endl;
     }
     else {
-        wcout << "Failed to read data from the pipe." << endl;
+        cout << "Failed to read data from the pipe." << endl;
+        cout << GetLastError() << endl;
+        return "ERROR READING";
     }
     // Close our pipe handle
     CloseHandle(pipe);
-    wcout << "Done." << endl;
     wstring ws(buffer);
     // your new String
     string str(ws.begin(), ws.end());
     return str;
 }
 
-void writeToPipe(string name, string content)
+void writeToPipe(string content)
 {
-    wcout << "Creating an instance of a named pipe..." << endl;
-    string pipeName = "\\\\.\\pipe\\my_pipe";
+    cout << "Creating an instance of a named pipe..." << endl;
+    string pipeName = "\\\\.\\pipe\\pipe";
     // Create a pipe to send data
+    wstring temp = wstring(pipeName.begin(), pipeName.end());
+    const wchar_t* nameW = temp.c_str();
     HANDLE pipe = CreateNamedPipe(
-        wstring(pipeName.begin(), pipeName.end()).c_str(), // name of the pipe
-        PIPE_ACCESS_OUTBOUND, // 1-way pipe -- send only
+        nameW, // name of the pipe
+        PIPE_ACCESS_DUPLEX, // 1-way pipe -- send only
         PIPE_TYPE_BYTE, // send data as a byte stream
-        1, // only allow 1 instance of this pipe
+        20, // allow 20 instance of this pipe
         0, // no outbound buffer
         0, // no inbound buffer
         0, // use default wait time
@@ -95,25 +100,17 @@ void writeToPipe(string name, string content)
     );
     if (pipe == NULL || pipe == INVALID_HANDLE_VALUE) 
     {
-        wcout << "Failed to create outbound pipe instance.";
+        cout << "Failed to create outbound pipe instance.";
         cout << GetLastError() << endl;
         system("pause");
         return;
     }
-    wcout << "Waiting for a client to connect to the pipe..." << endl;
     // This call blocks until a client process connects to the pipe
     BOOL result = ConnectNamedPipe(pipe, NULL);
-    if (!result) 
-    {
-        wcout << "Failed to make connection on named pipe." << endl;
-        // look up error code here using GetLastError()
-        CloseHandle(pipe); // close the pipe
-        system("pause");
-        return;
-    }
-    wcout << "Sending data to pipe..." << endl;
+
+    //cout << "Sending data to pipe..." << endl;
     // This call blocks until a client process reads all the data
-    wstring temp = wstring(content.begin(), content.end());
+    temp = wstring(content.begin(), content.end());
     const wchar_t* data = temp.c_str();
     DWORD numBytesWritten = 0;
     result = WriteFile(
@@ -123,14 +120,10 @@ void writeToPipe(string name, string content)
         &numBytesWritten, // will store actual amount of data sent
         NULL // not using overlapped IO
     );
-    if (result) 
+    if (!result) 
     {
-        wcout << "Number of bytes sent: " << numBytesWritten << endl;
-    }
-    else 
-    {
-        wcout << "Failed to send data." << endl;
-        // look up error code here using GetLastError()
+        cout << "Failed to send data." << endl;
+        cout << GetLastError() << endl;
     }
     // Close the pipe (automatically disconnects client too)
     CloseHandle(pipe);
@@ -156,7 +149,7 @@ void getFiles(string folderName, bool isMain)
 
             string command = "C:\\Studia\\PR\\Laby\\Lab1\\Project1\\Debug\\Project1.exe ";
             command.append(entry.path().string());
-            command.append(" NotMain");
+            command.append(" ItIsNotMain");
             TCHAR commandTChar[200];
             _tcscpy_s(commandTChar, CA2T(command.c_str()));
 
@@ -189,11 +182,10 @@ void getFiles(string folderName, bool isMain)
         {
             content += "\t" + entry.path().string() + "\n";
         }
-
     }
-    //cout << content << endl;
+    cout << content << endl;
     if(!isMain)
-        writeToPipe(folderName, content);
+        writeToPipe(content);
 }
 
 void main(int argc, char* argv[])
@@ -209,43 +201,15 @@ void main(int argc, char* argv[])
         isMain = false;
 
     std::string str(argv[1]);
+    getFiles(argv[1], isMain);
     if (isMain)
     {
-        STARTUPINFO si;
-        PROCESS_INFORMATION pi;
-
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-        ZeroMemory(&pi, sizeof(pi));
-
-        string command = "C:\\Studia\\PR\\Laby\\Lab1\\Project1\\Debug\\Project1.exe ";
-        command.append(".");
-        command.append(" NotMain");
-        TCHAR commandTChar[200];
-        _tcscpy_s(commandTChar, CA2T(command.c_str()));
-
-        // Start the child process. 
-        if (!CreateProcess(NULL,   // No module name (use command line)
-            commandTChar,        // Command line
-            NULL,           // Process handle not inheritable
-            NULL,           // Thread handle not inheritable
-            FALSE,          // Set handle inheritance to FALSE
-            CREATE_NEW_CONSOLE,              // No creation flags
-            NULL,           // Use parent's environment block
-            NULL,           // Use parent's starting directory 
-            &si,            // Pointer to STARTUPINFO structure
-            &pi)           // Pointer to PROCESS_INFORMATION structure
-            )
+        while (true)
         {
-            printf("CreateProcess failed (%d).\n", GetLastError());
-            return;
+            cout << readFromPipe();
         }
     }
-    else
-        writeToPipe("", "It lives");
-    if(argc==2)
-        cout << readFromPipe(str);
-    
+        
     system("pause");
 
 }
